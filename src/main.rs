@@ -94,7 +94,7 @@ async fn handle(bot: Client, event: Event, _state: NoState) -> anyhow::Result<()
         }
 
         Event::Login => {
-            bot.chat("Olá! Eu sou o Popeta, o bot legal.\nSe você gostou desse projeto, dê uma star no GitHub por favor: https://github.com/RyDiffusion/Popeta");
+            bot.chat("Olá! Eu sou o Popeta, o bot legal. Se você gostou desse projeto, dê uma star no GitHub por favor: https://github.com/Ry-Diffusion/Popeta");
         }
 
         Event::Disconnect(why) => {
