@@ -10,6 +10,10 @@ setTimeout(async () => {
 
          const popeta = spawn('./popeta', [], { signal });
 
+	 popeta.on('error', (err) => {
+		 console.log('agent.error: ' + err)
+	 })
+
          popeta.stdout.on('data', function (data) {
             console.log('popeta: ' + data);
             const content = String(data);
