@@ -1,12 +1,49 @@
 #![feature(never_type)]
 use anyhow::bail;
 use anyhow::{Context, Result};
-use azalea::{prelude::*, NoState};
+use azalea::pathfinder::goals::BlockPosGoal;
+use azalea::{prelude::*, BlockPos, NoState};
 use std::fs::read_to_string;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::ToSocketAddrs;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static HAVE_OP: AtomicBool = AtomicBool::new(true);
+static mut GOTO_STATE: GotoState = GotoState::NORTH;
+
+#[derive(Copy, Clone, Debug)]
+enum GotoState {
+    NORTH,
+    EAST,
+    WEST,
+    SOUTH,
+}
+
+impl GotoState {
+    fn next(self) -> Self {
+        use GotoState::*;
+        match self {
+            NORTH => SOUTH,
+            SOUTH => WEST,
+            WEST => EAST,
+            EAST => NORTH,
+        }
+    }
+
+    fn apply(&self, pos: BlockPos, amount: i32) -> BlockPos {
+        use GotoState::*;
+        match self {
+            NORTH => pos.north(amount),
+            SOUTH => pos.south(amount),
+            EAST => pos.east(amount),
+            WEST => pos.west(amount),
+        }
+    }
+}
+
+/** REQUIRED TO MOVE PLAYER AFTER 128 TICKS */
+const MOVE_TICK_REQUIRED: u32 = 128;
+const MOVE_TICK_JUMP_REQUIRED: u32 = 76;
+static mut TICK_COUNT: u32 = 0;
 
 fn load_conf(username: &mut String, server_addr: &mut String) -> Result<()> {
     let contents = read_to_string("./conf.txt").context("please create conf.txt")?;
@@ -44,7 +81,11 @@ async fn main() -> Result<!> {
 
     load_conf(&mut username, &mut server_addr).context("unable to parse config file")?;
 
-    println!("username={username} server_addr={server_addr}");
+    println!(
+        "conf: username={username} server_addr={server_addr} have_op? {}",
+        HAVE_OP.load(Ordering::Relaxed)
+    );
+
     let account = Account::offline(&username);
 
     ClientBuilder::new()
@@ -61,7 +102,7 @@ async fn main() -> Result<!> {
         .context("Runtime error")
 }
 
-async fn handle(bot: Client, event: Event, _state: NoState) -> anyhow::Result<()> {
+async fn handle(mut bot: Client, event: Event, _state: NoState) -> anyhow::Result<()> {
     match event {
         Event::Chat(m) => {
             let Some(remetent) = m.username() else {
@@ -82,7 +123,7 @@ async fn handle(bot: Client, event: Event, _state: NoState) -> anyhow::Result<()
             };
 
             match command {
-                "farm" if HAVE_OP.load(Ordering::Relaxed) => {
+                "tp-here" if HAVE_OP.load(Ordering::Relaxed) => {
                     bot.send_command_packet(&format!("tp {} {remetent}", bot.profile.name));
                     bot.send_command_packet(&format!("w {remetent} Pronto!"))
                 }
@@ -94,8 +135,32 @@ async fn handle(bot: Client, event: Event, _state: NoState) -> anyhow::Result<()
         }
 
         Event::Login => {
-            bot.chat("Olá! Eu sou o Popeta, o bot legal. Se você gostou desse projeto, dê uma star no GitHub por favor: https://github.com/Ry-Diffusion/Popeta");
+            bot.chat(concat!("Olá! Eu sou a Popeta (versão v", env!("CARGO_PKG_VERSION"), "), o bot legal. Se você gostou desse projeto, dê uma star no GitHub por favor: https://github.com/Ry-Diffusion/Popeta"));
         }
+
+        /* UNSAFE? IDC */
+        Event::Tick => unsafe {
+            if TICK_COUNT >= MOVE_TICK_JUMP_REQUIRED {
+                bot.jump();
+            }
+
+            if TICK_COUNT >= MOVE_TICK_REQUIRED {
+                let current_pos = bot.position();
+                let new_pos = GOTO_STATE.apply(BlockPos::from(current_pos), 5);
+
+                println!("=> state: {GOTO_STATE:?}");
+                println!("==> pos: {current_pos:?}");
+                println!("===> new pos: {new_pos:?}");
+
+                bot.goto(BlockPosGoal(new_pos));
+
+                GOTO_STATE = dbg!(GOTO_STATE.next());
+
+                TICK_COUNT = 0;
+            }
+
+            TICK_COUNT += 1;
+        },
 
         Event::Disconnect(why) => {
             eprintln!("bot disconnected! why? {why:?}");
